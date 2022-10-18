@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations: {}
+  labels:
+    app: productpage
+    version: v1
+  name: productpage-v1
+  namespace: bookinfo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: productpage
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: productpage
+        version: v1
+    spec:
+      containers:
+        - image: 'docker.io/istio/examples-bookinfo-productpage-v1:1.16.4'
+          imagePullPolicy: IfNotPresent
+          name: productpage
+          ports:
+            - containerPort: 9080
+          securityContext:
+            runAsUser: 1000
+      serviceAccountName: bookinfo-productpage
+      volumes:
+        - emptyDir: {}
+          name: tmp
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations: {}
+  labels:
+    app: productpage
+    service: productpage
+  name: productpage
+  namespace: bookinfo
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 9080
+      nodePort: 31198
+  selector:
+    app: productpage
+---
+apiVersion: gateway.solo.io/v1
+kind: VirtualService
+metadata:
+  name: my-virtual-service
+  namespace: gloo-system
+spec:
+  virtualHost:
+    domains:
+      - '*'
+    routes:
+    - matchers:
+      - prefix: /productpage
+      routeAction:
+        single:
+          upstream:
+            name: bookinfo-static-upstream
+            namespace: gloo-system
+          kube:
+            ref:
+              name: productpage
+              namespace: bookinfo
+            port: 9080
+    options:
+      extauth:
+        configRef:
+          name: oidc-keycloak
+          namespace: gloo-system
+
+---
+apiVersion: gloo.solo.io/v1
+kind: Upstream
+metadata:
+  name: bookinfo-static-upstream
+  namespace: gloo-system
+spec:
+  static:
+    hosts:
+      - addr: productpage.bookinfo
+        port: 9080
+---
+apiVersion: enterprise.gloo.solo.io/v1
+kind: AuthConfig
+metadata:
+  name: oidc-keycloak
+  namespace: gloo-system
+spec:
+  configs:
+  - oauth2:
+      oidcAuthorizationCode:
+        appUrl: http://172.28.29.60:31500/productpage
+        callbackPath: /callback
+        clientId: my_nodejs_client
+        clientSecretRef:
+          name: oauth
+          namespace: gloo-system
+        issuerUrl: http://localhost:8080/auth/realms/my_login_realm/protocol/openid-connect/auth
+        scopes:
+        - openid
+        session:
+          cookieOptions:
+            notSecure: true
